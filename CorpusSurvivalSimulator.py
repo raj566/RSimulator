@@ -1,0 +1,950 @@
+#
+#╔══════════════════════════════════════════════════════════════════════╗
+#║       Retirement Corpus Survival Simulator  ·  Streamlit             ║
+#║  Monte Carlo · Tax · Healthcare · Spouse · Full Expense Model        ║
+#╚══════════════════════════════════════════════════════════════════════╝
+#
+
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+import plotly.express as px
+import streamlit as st
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Page config
+# ─────────────────────────────────────────────────────────────────────────────
+st.set_page_config(
+    page_title="Retirement Survival Simulator",
+    page_icon="📈",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Custom CSS
+# ─────────────────────────────────────────────────────────────────────────────
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500&family=IBM+Plex+Sans:wght@300;400&display=swap');
+
+html, body, [class*="css"] { font-family: 'IBM Plex Sans', sans-serif; }
+
+h1, h2, h3 { font-family: 'IBM Plex Mono', monospace !important; }
+
+/* Metric cards */
+.metric-grid { display: flex; gap: 0.6rem; flex-wrap: wrap; margin-bottom: 1rem; }
+.metric-box {
+    background: #111711; border: 1px solid #1f2e1f; border-radius: 6px;
+    padding: 0.9rem 1rem; flex: 1; min-width: 130px; text-align: center;
+}
+.metric-label {
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.58rem;
+    letter-spacing: 0.14em; text-transform: uppercase; color: #6b8f6b;
+    margin-bottom: 0.3rem; display: block;
+}
+.metric-value { font-size: 1.5rem; font-weight: 700; line-height: 1.1; display: block; }
+.green  { color: #4ade80; }
+.yellow { color: #fbbf24; }
+.red    { color: #f87171; }
+.orange { color: #f97316; }
+.purple { color: #c084fc; }
+.sky    { color: #38bdf8; }
+
+/* Callout boxes */
+.callout {
+    padding: 0.6rem 0.9rem; border-radius: 4px; margin-bottom: 0.8rem;
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.7rem; line-height: 1.55;
+}
+.callout-orange { background: rgba(249,115,22,0.08); border-left: 3px solid #431407; color: #f97316; }
+.callout-blue   { background: rgba(96,165,250,0.08); border-left: 3px solid #1e3a5f; color: #60a5fa; }
+.callout-purple { background: rgba(192,132,252,0.08); border-left: 3px solid #3b1f5e; color: #c084fc; }
+.callout-sky    { background: rgba(56,189,248,0.08); border-left: 3px solid #0c2a3f; color: #38bdf8; }
+.callout-green  { background: rgba(74,222,128,0.08); border-left: 3px solid #166534; color: #4ade80; }
+
+/* Spend summary */
+.spend-strip {
+    background: #111711; border: 1px solid #1f2e1f; border-radius: 6px;
+    padding: 0.7rem 1rem; display: flex; gap: 1.5rem; flex-wrap: wrap;
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.72rem;
+    margin-top: 0.5rem;
+}
+.spend-total { color: #4ade80; font-weight: 500; }
+
+/* Section header in tables */
+.section-row { background: rgba(255,255,255,0.02); font-size: 0.65rem;
+               text-transform: uppercase; letter-spacing: 0.12em; color: #3a5a3a; }
+
+div[data-testid="stExpander"] { border: 1px solid #1f2e1f !important; border-radius: 6px; }
+</style>
+""", unsafe_allow_html=True)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Historical return data  (US stocks & bonds, 1926–2024)
+# ─────────────────────────────────────────────────────────────────────────────
+STOCK_R = np.array([
+    .1154,.3755,.4374,-.083,-.2505,-.4386,-.0819,.5381,.048,-.0185,
+    .3192,.3324,.3567,-.055,.2969,.2415,.1906,.3612,.1462,.0229,
+    .1572,.2374,.1868,.3186,-.047,.2042,.2234,.0668,.1847,.3145,
+    -.01,.5255,.3261,.0772,.2563,.1869,-.143,-.259,-.1477,-.2643,
+    .3723,.239,.0806,.1069,.2434,-.0697,.1414,.1878,.2896,.21,
+    .231,.1662,.311,.1854,.0549,.1667,.3136,.2026,.1551,.0211,
+    .301,.0762,.1006,.0132,.3713,.2268,.33,.2867,.2104,.1534,
+    -.091,-.1189,-.221,.2868,.1088,-.0491,.1579,.0549,.1565,.049,
+    .1579,.0547,-.37,.2646,.1506,.0211,.16,.3239,.1369,.0138,
+    .1196,.2183,.2183,-.0438,.3149,.184,-.2438,.2646,.15,.0211,
+])
+BOND_R = np.array([
+    .0315,.0432,.041,.0358,.0347,.0454,.038,.0405,.0378,.0358,
+    .0352,.0396,.0341,.0365,.0398,.0424,.0452,.0484,.0516,.0447,
+    .038,.0412,.0356,.0389,.0423,.0516,.0521,.0584,.0621,.071,
+    .0788,.0816,.0754,.0623,.0548,.0476,.0645,-.0281,.0835,.1424,
+    .3212,.032,.1338,.1446,.0453,.0202,.029,.0678,.0985,.082,
+    .1558,.0338,.1221,.0827,.1587,.1291,.0245,.098,.1148,.0021,
+    .1432,.0921,.0756,.0636,.0758,.0896,.0896,.0736,.0582,.0378,
+    .0484,.0521,.0147,.0416,.0282,.044,.0731,.0697,.1055,.0755,
+    .0197,.0578,-.0201,.1193,.0836,.0292,.0143,.0099,.0149,.0297,
+    -.0118,-.0152,-.133,.0555,.06,.0298,.035,.04,.035,.025,
+])
+
+RMD_TABLE = {
+    72:27.4,73:26.5,74:25.5,75:24.6,76:23.7,77:22.9,78:22.0,79:21.1,
+    80:20.2,81:19.4,82:18.5,83:17.7,84:16.8,85:16.0,86:15.2,87:14.4,
+    88:13.7,89:12.9,90:12.2,91:11.5,92:10.8,93:10.1,94:9.5, 95:8.9,
+    96:8.4, 97:7.8, 98:7.3, 99:6.8,100:6.4,
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 2024 Tax constants
+# ─────────────────────────────────────────────────────────────────────────────
+TAX_BRACKETS = {
+    "mfj":    {"std": 29200, "b": [(23200,.10),(94300,.12),(201050,.22),(383900,.24),(487450,.32),(731200,.35),(float("inf"),.37)]},
+    "single": {"std": 14600, "b": [(11600,.10),(47150,.12),(100525,.22),(191950,.24),(243725,.32),(609350,.35),(float("inf"),.37)]},
+    "hoh":    {"std": 21900, "b": [(16550,.10),(63100,.12),(100500,.22),(191950,.24),(243700,.32),(609350,.35),(float("inf"),.37)]},
+}
+LTCG_BRACKETS = {
+    "mfj":    [(94050,0.0),(583750,0.15),(float("inf"),0.20)],
+    "single": [(47025,0.0),(518900,0.15),(float("inf"),0.20)],
+    "hoh":    [(63000,0.0),(551350,0.15),(float("inf"),0.20)],
+}
+AGE65_EXTRA = {"mfj": 1550, "single": 1950, "hoh": 1950}  # per person, 2024
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tax helpers
+# ─────────────────────────────────────────────────────────────────────────────
+def fed_tax(taxable: float, filing: str) -> float:
+    if taxable <= 0: return 0.0
+    brackets = TAX_BRACKETS.get(filing, TAX_BRACKETS["mfj"])["b"]
+    tax, prev = 0.0, 0.0
+    for limit, rate in brackets:
+        if taxable <= limit:
+            tax += (taxable - prev) * rate; break
+        tax += (limit - prev) * rate; prev = limit
+    return tax
+
+def ltcg_tax(ltcg: float, ordinary: float, filing: str) -> float:
+    if ltcg <= 0: return 0.0
+    brackets = LTCG_BRACKETS.get(filing, LTCG_BRACKETS["mfj"])
+    tax, remaining = 0.0, ltcg
+    for limit, rate in brackets:
+        space = max(limit - ordinary, 0.0)
+        used = min(remaining, space)
+        tax += used * rate
+        remaining -= used
+        if remaining <= 0: break
+    return tax
+
+def ss_taxable(ss_amt: float, other_inc: float, filing: str) -> float:
+    combined = other_inc + ss_amt * 0.5
+    t1 = 32000 if filing == "mfj" else 25000
+    t2 = 44000 if filing == "mfj" else 34000
+    if combined <= t1: return 0.0
+    if combined <= t2: return min(ss_amt * 0.5, (combined - t1) * 0.5)
+    return min(ss_amt * 0.85, ss_amt * 0.5 + (combined - t2) * 0.85 * 0.5)
+
+def compute_tax(gross, ss_inc, qcd, account_type, filing, state_rate,
+                persons, age, infl_f, med_deduct, salt, extra_std):
+    if account_type == "roth" or gross <= 0:
+        return {"total": 0, "federal": 0, "state": 0, "eff_rate": 0,
+                "ss_taxable": 0, "taxable_ord": 0, "ltcg": 0}
+    std = TAX_BRACKETS.get(filing, TAX_BRACKETS["mfj"])["std"] * infl_f
+    age65 = AGE65_EXTRA.get(filing, 1550) * persons * infl_f if age >= 65 else 0
+    adj_gross = max(gross - qcd, 0)
+    if account_type == "traditional":
+        ord_inc, ltcg = adj_gross, 0.0
+    elif account_type == "taxable":
+        ord_inc, ltcg = 0.0, adj_gross * 0.8
+    else:  # mixed
+        ord_inc, ltcg = adj_gross * 0.6, 0.0
+    ss_slice = ss_taxable(ss_inc, ord_inc, filing)
+    ord_inc += ss_slice
+    deductions = max(std + age65, med_deduct + salt + age65) + extra_std * infl_f
+    taxable_ord = max(ord_inc - deductions, 0)
+    federal = fed_tax(taxable_ord, filing) + ltcg_tax(ltcg, taxable_ord, filing)
+    state_base = max(ord_inc + ltcg - deductions * 0.5, 0)
+    state = state_base * state_rate
+    total = federal + state
+    eff = total / gross if gross > 0 else 0
+    return {"total": total, "federal": federal, "state": state, "eff_rate": eff,
+            "ss_taxable": ss_slice, "taxable_ord": taxable_ord, "ltcg": ltcg}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Healthcare cost for a given year
+# ─────────────────────────────────────────────────────────────────────────────
+def health_cost_year(y, cur_age, num_persons, hc):
+    f = (1 + hc["health_infl"]) ** y
+    is_medicare = cur_age >= 65
+    if is_medicare:
+        premiums = ((hc["part_b"] * 12) + (hc["medigap"] * 12) + (hc["part_d"] * 12)) * num_persons * f
+    else:
+        premiums = hc["aca"] * 12 * f
+    age_factor = 1.5 if cur_age >= 80 else (1.25 if cur_age >= 75 else 1.0)
+    oop = (hc["oop_routine"] + hc["rx"] + hc["wellness"]) * age_factor * f
+    if cur_age < hc["ltc_until_age"]:
+        ltc = hc["ltc_prem"] * f
+    elif cur_age >= 80:
+        ltc = hc["ltc_oop"] * f
+    else:
+        ltc = 0.0
+    return premiums + oop + ltc
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Main simulation engine
+# ─────────────────────────────────────────────────────────────────────────────
+def run_simulation(p: dict, n_sims: int = 1000) -> dict:
+    years = max(p["horizon_age"] - p["age"], 1)
+    sp = p["stock_pct"] / 100
+    infl = p["infl"] / 100
+    fees = p["fees"] / 100
+    h_infl = p["hc"]["health_infl"] if p["use_health"] else 0.0
+
+    end_bals, fail_years, all_paths = [], [], []
+    total_tax_drag = 0.0
+    total_health_lifetime = 0.0
+
+    rng = np.random.default_rng()
+
+    for _ in range(n_sims):
+        bal = p["corpus"]
+        ann_spend = p["spend"]
+        fail_y = -1
+        sim_health = 0.0
+        path = [bal]
+
+        for y in range(years):
+            cur_age = p["age"] + y
+            primary_alive = cur_age <= p["target_age"]
+            spouse_age_cur = p["spouse_age"] + y if p["use_spouse"] else 0
+            spouse_alive = p["use_spouse"] and spouse_age_cur <= p["spouse_target_age"]
+            num_persons = 2 if (primary_alive and spouse_alive) else 1
+
+            # ── Income ──
+            prim_ss = p["ss"] * (1.025 ** y) if cur_age >= p["ss_age"] else 0.0
+            sp_ss = 0.0
+            if p["use_spouse"] and spouse_alive and spouse_age_cur >= p["spouse_ss_age"]:
+                sp_ss = p["spouse_ss"] * (1.025 ** y)
+            # Survivor
+            if p["use_spouse"] and not primary_alive and spouse_alive:
+                prim_ss = max(p["ss"], p["spouse_ss"]) * (1.025 ** y) * p["survivor_ben"] / 100
+                sp_ss = 0.0
+            elif p["use_spouse"] and primary_alive and not spouse_alive:
+                sp_ss = 0.0
+            total_ss = prim_ss + sp_ss
+            pension_inc = p["pension"] * (1.025 ** y)
+            pt_inc = p["pt_income"] if cur_age < p["pt_until_age"] else 0.0
+            total_income = total_ss + pension_inc + pt_inc
+
+            # ── Healthcare ──
+            hcost = 0.0
+            if p["use_health"]:
+                hcost = health_cost_year(y, cur_age, num_persons, p["hc"])
+                sim_health += hcost
+
+            # ── Other expenses ──
+            other_y = p["other_expenses"] * ((1 + infl) ** y) if p["use_expense"] else 0.0
+
+            # ── Living spend (survivor adjustment) ──
+            living = ann_spend
+            if p["use_spouse"] and (not primary_alive or not spouse_alive):
+                living = ann_spend * p["survivor_spend_pct"] / 100
+
+            # ── Net need before tax ──
+            net_need = max(living + hcost + other_y - total_income, 0.0)
+
+            # ── Tax gross-up (2-pass) ──
+            tax_amt = 0.0
+            if p["use_tax"] and net_need > 0:
+                gross = net_need
+                for _ in range(2):
+                    tr = compute_tax(gross, total_ss, p["qcd"] * ((1+infl)**y),
+                                     p["account_type"], p["filing"], p["state_rate"] / 100,
+                                     num_persons, cur_age, (1+infl)**y,
+                                     p["med_deduct"], p["salt"], p["extra_std"])
+                    tax_amt = tr["total"]
+                    gross = net_need + tax_amt
+                if y == 0:
+                    total_tax_drag += tr["eff_rate"]
+
+            gross_withdrawal = net_need + tax_amt
+
+            # ── Strategy overrides ──
+            if p["strategy"] == "pct":
+                gross_withdrawal = bal * 0.04
+            elif p["strategy"] == "rmd":
+                divisor = RMD_TABLE.get(min(max(int(cur_age), 72), 100), 6.4)
+                gross_withdrawal = bal / divisor
+            elif p["strategy"] == "flexible":
+                wr = net_need / bal if bal > 0 else 1.0
+                if wr > 0.055: net_need *= 0.90
+                elif wr < 0.035: net_need = min(net_need * 1.10, p["spend"] * 1.25)
+                gross_withdrawal = net_need + tax_amt
+
+            gross_withdrawal = max(gross_withdrawal, 0.0)
+
+            # ── Market return ──
+            idx = rng.integers(0, len(STOCK_R))
+            ret = STOCK_R[idx] * sp + BOND_R[idx] * (1 - sp) - fees
+            bal = max((bal - gross_withdrawal) * (1 + ret), 0.0)
+            if bal <= 0 and fail_y < 0:
+                fail_y = y
+            path.append(bal)
+            ann_spend *= (1 + infl)
+
+        all_paths.append(path)
+        end_bals.append(bal)
+        if fail_y >= 0:
+            fail_years.append(fail_y)
+        total_health_lifetime += sim_health
+
+    # Percentile paths
+    pcts = {}
+    arr = np.array(all_paths)
+    for pct in [10, 25, 50, 75, 90]:
+        pcts[pct] = np.percentile(arr, pct, axis=0)
+
+    end_arr = np.sort(end_bals)
+    success = np.sum(np.array(end_bals) > 0)
+    sr = success / n_sims
+    avg_tax_drag = (total_tax_drag / n_sims * 100) if p["use_tax"] else None
+    avg_health = total_health_lifetime / n_sims if p["use_health"] else 0.0
+
+    return {
+        "sr": sr, "end_arr": end_arr, "pcts": pcts, "fail_years": fail_years,
+        "years": years, "avg_tax_drag": avg_tax_drag, "avg_health": avg_health,
+        "n_sims": n_sims,
+    }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Helpers
+# ─────────────────────────────────────────────────────────────────────────────
+def fmt(v): return f"${max(v,0):,.0f}"
+def fmtM(v):
+    if v <= 0: return "$0"
+    return f"${v/1e6:.2f}M" if abs(v) >= 1e6 else f"${v:,.0f}"
+def metric_html(label, value, color="green"):
+    return f"""<div class="metric-box">
+      <span class="metric-label">{label}</span>
+      <span class="metric-value {color}">{value}</span>
+    </div>"""
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Plotly theme defaults
+# ─────────────────────────────────────────────────────────────────────────────
+PLOT_LAYOUT = dict(
+    plot_bgcolor="#0a0e0a", paper_bgcolor="#0a0e0a",
+    font=dict(family="IBM Plex Mono", color="#6b8f6b"),
+    margin=dict(l=55, r=20, t=30, b=55),
+    legend=dict(bgcolor="rgba(0,0,0,0)", bordercolor="#1f2e1f", borderwidth=1),
+)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ════════════════════════  SIDEBAR  ══════════════════════════════════════════
+# ─────────────────────────────────────────────────────────────────────────────
+with st.sidebar:
+    st.markdown("## 📈 Retirement Simulator")
+    st.caption("Monte Carlo · Tax · Healthcare · Spouse")
+
+    # ── Portfolio & Income ────────────────────────────────────────────────────
+    with st.expander("💰 Portfolio & Income", expanded=True):
+        corpus     = st.slider("Current Corpus", 100_000, 5_000_000, 1_500_000, 50_000, format="$%d")
+        spend      = st.slider("Base Annual Living Spend", 20_000, 250_000, 60_000, 5_000, format="$%d",
+                               help="Excludes healthcare. Food, housing, travel, utilities.")
+        ss         = st.slider("Primary Social Security (annual)", 0, 60_000, 24_000, 500, format="$%d")
+        ss_age     = st.slider("SS Starts at Age", 62, 70, 67)
+        pension    = st.slider("Pension / Annuity (annual)", 0, 80_000, 0, 1_000, format="$%d")
+        pt_income  = st.slider("Part-time / Rental Income (annual)", 0, 60_000, 0, 1_000, format="$%d")
+        pt_until   = st.slider("Part-time Income Until Age", 60, 85, 70)
+
+    # ── Timeline & Allocation ─────────────────────────────────────────────────
+    with st.expander("📅 Timeline & Allocation", expanded=True):
+        c1, c2 = st.columns(2)
+        age        = c1.slider("Your Age", 40, 85, 62)
+        target_age = c2.slider("Plan Until", max(age+5,70), 105, 92)
+        stock_pct  = st.slider("Stocks Allocation (%)", 0, 100, 60, 5)
+        infl       = st.slider("General Inflation (%)", 1.0, 8.0, 3.0, 0.5)
+        fees       = st.slider("Investment Fees (%/yr)", 0.0, 2.0, 0.10, 0.05)
+        strategy   = st.selectbox("Withdrawal Strategy", [
+            ("fixed",    "Fixed (inflation-adjusted)"),
+            ("flexible", "Guardrail Method"),
+            ("pct",      "Constant 4% of Portfolio"),
+            ("rmd",      "RMD-based Withdrawals"),
+        ], format_func=lambda x: x[1])[0]
+        n_sims     = st.select_slider("Simulations", [500, 1000, 2000, 5000], 1000)
+
+    # ── Healthcare ────────────────────────────────────────────────────────────
+    use_health = st.sidebar.checkbox("🟠 Include Healthcare & Medicines", value=True)
+    if use_health:
+        with st.expander("🟠 Healthcare & Medicines", expanded=False):
+            st.markdown('<div class="callout callout-orange">Defaults = health-conscious US couple age 62. HealthView 2024. Medical inflation ~5.5%/yr. Medicare at 65.</div>', unsafe_allow_html=True)
+
+            st.markdown("**Medicare Premiums (per person)**")
+            part_b  = st.slider("Part B Premium ($/mo per person)", 100, 600, 174, 5)
+            medigap = st.slider("Medigap / Medicare Advantage ($/mo per person)", 0, 500, 185, 10)
+            part_d  = st.slider("Part D Drug Plan ($/mo per person)", 0, 200, 55, 5)
+            st.caption(f"Combined couple premiums at 65: ${(part_b+medigap+part_d)*24:,.0f}/yr")
+
+            st.markdown("**Pre-Medicare (before age 65)**")
+            aca     = st.slider("ACA / COBRA Premium ($/mo, couple)", 0, 3000, 1400, 50)
+
+            st.markdown("**Out-of-Pocket Medical (annual)**")
+            oop_r   = st.slider("Routine OOP: copays, labs, vision, dental", 0, 15_000, 4_200, 200)
+            rx      = st.slider("Prescription Drugs (annual)", 0, 20_000, 2_800, 200)
+            wellness= st.slider("Fitness / Wellness / Supplements", 0, 10_000, 2_400, 200)
+
+            st.markdown("**Long-Term Care**")
+            ltc_prem     = st.slider("LTC Insurance Premium (annual, couple)", 0, 20_000, 5_200, 200)
+            ltc_until    = st.slider("LTC Premium Until Age", 65, 95, 80)
+            ltc_oop      = st.slider("OOP LTC Costs/yr after age 80", 0, 120_000, 18_000, 1_000,
+                                     help="Residual after insurance payout. Median nursing home ~$104k/yr.")
+
+            st.markdown("**Medical Inflation**")
+            health_infl  = st.slider("Healthcare Inflation Rate (%)", 2.0, 10.0, 5.5, 0.5)
+    else:
+        part_b=medigap=part_d=aca=oop_r=rx=wellness=ltc_prem=ltc_oop=0
+        ltc_until=80; health_infl=5.5
+
+    hc_params = dict(
+        health_infl=health_infl/100, part_b=part_b, medigap=medigap, part_d=part_d,
+        aca=aca, oop_routine=oop_r, rx=rx, wellness=wellness,
+        ltc_prem=ltc_prem, ltc_until_age=ltc_until, ltc_oop=ltc_oop,
+    )
+
+    # ── Other Expenses ────────────────────────────────────────────────────────
+    use_expense = st.sidebar.checkbox("🔵 Include Other Expenses & Deductions", value=True)
+    if use_expense:
+        with st.expander("🔵 Other Expenses & Deductions", expanded=False):
+            st.markdown("**Housing**")
+            h1, h2, h3 = st.columns(3)
+            prop_tax  = h1.number_input("Property Tax", 0, 30_000, 6_000, 500)
+            home_ins  = h2.number_input("Home Insurance", 0, 10_000, 2_400, 200)
+            home_maint= h3.number_input("Home Maintenance", 0, 25_000, 5_000, 500)
+
+            st.markdown("**Insurance**")
+            i1, i2, i3 = st.columns(3)
+            life_ins  = i1.number_input("Life Insurance", 0, 15_000, 2_000, 250)
+            auto_ins  = i2.number_input("Auto Insurance", 0, 8_000, 2_800, 200)
+            umbrella  = i3.number_input("Umbrella/Other", 0, 5_000, 600, 100)
+
+            st.markdown("**Lifestyle & Travel**")
+            t1, t2 = st.columns(2)
+            travel   = t1.number_input("Travel (annual)", 0, 60_000, 8_000, 1_000)
+            hobbies  = t2.number_input("Hobbies / Entertainment", 0, 20_000, 4_000, 500)
+
+            st.markdown("**Family & Charitable**")
+            g1, g2 = st.columns(2)
+            gifts    = g1.number_input("Family Gifts / Grandkids", 0, 30_000, 3_000, 500)
+            charity  = g2.number_input("Charitable Giving", 0, 50_000, 2_500, 500)
+
+            st.markdown("**Tax Deductions**")
+            d1, d2 = st.columns(2)
+            med_deduct = d1.number_input("Medical Expense Deduction", 0, 30_000, 0, 500,
+                                          help="Amount exceeding 7.5% of AGI")
+            qcd        = d2.number_input("QCD from IRA (annual)", 0, 105_000, 0, 1_000,
+                                          help="Reduces taxable RMD. Age 70½+. Max $105k in 2024.")
+            d3, d4 = st.columns(2)
+            salt       = d3.number_input("SALT / Itemized Deductions", 0, 30_000, 10_000, 500)
+            extra_std  = d4.number_input("Extra Std Deduction (age 65+)", 0, 10_000, 0, 500,
+                                          help="$1,550/person auto-applied at 65. Add any extra here.")
+        other_expenses = prop_tax+home_ins+home_maint+life_ins+auto_ins+umbrella+travel+hobbies+gifts+charity
+    else:
+        prop_tax=home_ins=home_maint=life_ins=auto_ins=umbrella=travel=hobbies=gifts=charity=0
+        med_deduct=qcd=salt=extra_std=0
+        other_expenses=0
+
+    # ── Spouse ────────────────────────────────────────────────────────────────
+    use_spouse = st.sidebar.checkbox("👥 Include Spouse / Partner", value=False)
+    if use_spouse:
+        with st.expander("👥 Spouse / Partner", expanded=True):
+            st.markdown('<div class="callout callout-blue">Dual SS, survivor benefits, and spending reduction after first death. Horizon extends to longer-lived plan age.</div>', unsafe_allow_html=True)
+            s1, s2 = st.columns(2)
+            spouse_age        = s1.slider("Spouse Age", 40, 85, 59)
+            spouse_target_age = s2.slider("Spouse Plan Until", max(spouse_age+5,70), 105, 95)
+            spouse_ss         = st.slider("Spouse SS / Pension (annual)", 0, 60_000, 18_000, 500, format="$%d")
+            spouse_ss_age     = st.slider("Spouse SS Starts At Age", 62, 70, 65)
+            survivor_ben      = st.slider("Survivor Benefit (% of higher SS)", 50, 100, 100, 5)
+            survivor_spend    = st.slider("Household Spending After First Death (%)", 40, 100, 75, 5)
+    else:
+        spouse_age=spouse_target_age=spouse_ss=spouse_ss_age=0
+        survivor_ben=survivor_spend=100
+
+    # ── Tax ───────────────────────────────────────────────────────────────────
+    use_tax = st.sidebar.checkbox("💜 Include Tax Modeling", value=False)
+    if use_tax:
+        with st.expander("💜 Tax Modeling (2024 Law)", expanded=False):
+            st.markdown('<div class="callout callout-purple">Federal brackets, SS taxation (up to 85%), age-65 deduction, QCDs, LTCG rates, state tax.</div>', unsafe_allow_html=True)
+            filing       = st.selectbox("Filing Status", [("mfj","Married Filing Jointly"),("single","Single"),("hoh","Head of Household")], format_func=lambda x:x[1])[0]
+            account_type = st.selectbox("Account Type", [
+                ("mixed","Mixed (60% Traditional / 40% Roth)"),
+                ("traditional","All Traditional (IRA / 401k)"),
+                ("roth","All Roth (tax-free)"),
+                ("taxable","Taxable Brokerage (LTCG rates)"),
+            ], format_func=lambda x:x[1])[0]
+            state_rate   = st.slider("State Income Tax Rate (%)", 0.0, 13.0, 5.0, 0.5)
+    else:
+        filing="mfj"; account_type="mixed"; state_rate=0.0
+
+    run_btn = st.button("▶  Run Simulation", use_container_width=True, type="primary")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ════════════════════════  MAIN AREA  ════════════════════════════════════════
+# ─────────────────────────────────────────────────────────────────────────────
+st.markdown("# 📈 Retirement Corpus Survival Simulator")
+st.caption("Monte Carlo · Historical US Returns (1926–2024) · 2024 Tax Law · HealthView Healthcare Data")
+
+# ── Live Spending Summary ────────────────────────────────────────────────────
+hc_year1 = health_cost_year(0, age, 2 if use_spouse else 1, hc_params) if use_health else 0
+total_year1 = spend + hc_year1 + other_expenses
+total_income_year1 = (ss if age >= ss_age else 0) + pension + pt_income + (spouse_ss if use_spouse and age >= spouse_ss_age else 0)
+net_withdrawal_year1 = max(total_year1 - total_income_year1, 0)
+
+st.markdown(f"""
+<div class="spend-strip">
+  <span>🏠 Living: <strong>{fmt(spend)}</strong></span>
+  <span>🏥 Health: <strong style="color:#f97316">{fmt(hc_year1)}</strong></span>
+  <span>📦 Other: <strong style="color:#38bdf8">{fmt(other_expenses)}</strong></span>
+  <span>💰 Income: <strong style="color:#4ade80">−{fmt(total_income_year1)}</strong></span>
+  <span class="spend-total">📊 Net Draw: <strong>{fmt(net_withdrawal_year1)}/yr</strong></span>
+  <span style="color:#6b8f6b">WR: {net_withdrawal_year1/corpus*100:.1f}%</span>
+</div>
+""", unsafe_allow_html=True)
+
+st.divider()
+
+if not run_btn:
+    st.info("👈 Configure your parameters in the sidebar, then click **Run Simulation**.")
+    # Show default healthcare projection even without running
+    if use_health:
+        st.subheader("🟠 Healthcare Cost Preview (before running simulation)")
+        ages_prev = range(age, min(age+31, 96), 5)
+        prev_data = []
+        for a in ages_prev:
+            y = a - age
+            n_p = 2 if use_spouse else 1
+            hc = health_cost_year(y, a, n_p, hc_params)
+            prev_data.append({"Age": a, "Annual Healthcare Cost": hc})
+        df_prev = pd.DataFrame(prev_data)
+        fig_prev = px.line(df_prev, x="Age", y="Annual Healthcare Cost",
+                           markers=True, color_discrete_sequence=["#f97316"])
+        fig_prev.update_layout(**PLOT_LAYOUT, height=300,
+                               yaxis=dict(tickprefix="$", gridcolor="#0f1a0f"),
+                               xaxis=dict(gridcolor="#0f1a0f"))
+        st.plotly_chart(fig_prev, use_container_width=True)
+    st.stop()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Build params dict & run
+# ─────────────────────────────────────────────────────────────────────────────
+horizon_age = max(target_age, spouse_target_age) if use_spouse else target_age
+persons = 2 if use_spouse else 1
+
+params = dict(
+    corpus=corpus, spend=spend, ss=ss, ss_age=ss_age, pension=pension,
+    pt_income=pt_income, pt_until_age=pt_until,
+    age=age, target_age=target_age, horizon_age=horizon_age,
+    stock_pct=stock_pct, infl=infl, fees=fees, strategy=strategy,
+    use_health=use_health, hc=hc_params,
+    use_expense=use_expense, other_expenses=other_expenses,
+    use_spouse=use_spouse, spouse_age=spouse_age,
+    spouse_target_age=spouse_target_age, spouse_ss=spouse_ss,
+    spouse_ss_age=spouse_ss_age, survivor_ben=survivor_ben,
+    survivor_spend_pct=survivor_spend,
+    use_tax=use_tax, filing=filing, account_type=account_type,
+    state_rate=state_rate, qcd=qcd, med_deduct=med_deduct,
+    salt=salt, extra_std=extra_std,
+)
+
+with st.spinner(f"Running {n_sims:,} Monte Carlo simulations…"):
+    res = run_simulation(params, n_sims)
+
+R      = res
+years  = R["years"]
+ages   = list(range(age, age + years + 1))
+end_arr= R["end_arr"]
+sr     = R["sr"]
+pcts   = R["pcts"]
+fail_years = R["fail_years"]
+med_end    = float(np.median(end_arr))
+p10_end    = float(np.percentile(end_arr, 10))
+p90_end    = float(np.percentile(end_arr, 90))
+wr         = net_withdrawal_year1 / corpus * 100
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ── Key Metrics ──────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+sr_col  = "green" if sr >= 0.9 else ("yellow" if sr >= 0.7 else "red")
+wr_col  = "green" if wr <= 4  else ("yellow" if wr <= 5.5 else "red")
+tax_col = "purple" if R["avg_tax_drag"] else "green"
+tax_val = f"{R['avg_tax_drag']:.1f}%" if R["avg_tax_drag"] else "N/A"
+hc_col  = "orange" if use_health else "green"
+hc_val  = fmtM(R["avg_health"]) if use_health else "N/A"
+
+st.markdown(f"""
+<div class="metric-grid">
+  {metric_html("Success Rate", f"{sr*100:.1f}%", sr_col)}
+  {metric_html("Median End Balance", fmtM(med_end), "green" if med_end>0 else "red")}
+  {metric_html("Net Withdrawal Rate", f"{wr:.2f}%", wr_col)}
+  {metric_html("10th %ile End", fmtM(p10_end), "yellow" if p10_end>0 else "red")}
+  {metric_html("Avg Tax Drag", tax_val, tax_col)}
+  {metric_html("Lifetime Health Cost", hc_val, hc_col)}
+</div>
+""", unsafe_allow_html=True)
+
+# Survival bar
+st.markdown(f"**Portfolio Survival Probability: {sr*100:.1f}%**")
+st.progress(float(sr))
+if use_spouse:
+    st.caption(f"👥 Dual-spouse · {survivor_spend}% spending after first death · Survivor SS {survivor_ben}% of higher benefit")
+
+st.divider()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ── Tabs ─────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+tab_proj, tab_spend, tab_scen, tab_tax, tab_health, tab_depl = st.tabs([
+    "📈 Projection", "💰 Spending Budget", "📋 Scenarios",
+    "💜 Tax Detail", "🟠 Healthcare", "⚠️ Depletion",
+])
+
+# ════════════════ TAB 1: PROJECTION ══════════════════════════════════════════
+with tab_proj:
+    fig = go.Figure()
+    # Shaded bands
+    fig.add_trace(go.Scatter(
+        x=ages + ages[::-1],
+        y=list(pcts[90]/1e6) + list(pcts[10]/1e6)[::-1],
+        fill="toself", fillcolor="rgba(74,222,128,0.04)",
+        line=dict(color="rgba(0,0,0,0)"), name="10th–90th Band", hoverinfo="skip",
+    ))
+    fig.add_trace(go.Scatter(
+        x=ages + ages[::-1],
+        y=list(pcts[75]/1e6) + list(pcts[25]/1e6)[::-1],
+        fill="toself", fillcolor="rgba(74,222,128,0.09)",
+        line=dict(color="rgba(0,0,0,0)"), name="25th–75th Band", hoverinfo="skip",
+    ))
+    styles = {
+        90: ("#4ade8044", 1.5, "dash",  "90th %ile"),
+        75: ("#4ade8077", 1.5, "solid", "75th %ile"),
+        50: ("#4ade80",   2.5, "solid", "Median"),
+        25: ("#fbbf2499", 1.5, "solid", "25th %ile"),
+        10: ("#f8717199", 1.5, "dash",  "10th %ile"),
+    }
+    for p, (color, width, dash, label) in styles.items():
+        fig.add_trace(go.Scatter(
+            x=ages, y=pcts[p]/1e6, mode="lines", name=label,
+            line=dict(color=color, width=width, dash=dash),
+            hovertemplate=f"Age %{{x}}<br>{label}: $%{{y:.2f}}M<extra></extra>",
+        ))
+    fig.update_layout(
+        **PLOT_LAYOUT, height=430,
+        xaxis=dict(title="Age", gridcolor="#0f1a0f", linecolor="#1f2e1f"),
+        yaxis=dict(title="Portfolio Value ($M)", tickprefix="$", ticksuffix="M",
+                   gridcolor="#0f1a0f", linecolor="#1f2e1f"),
+        hovermode="x unified",
+    )
+    st.plotly_chart(fig, use_container_width=True)
+    st.caption("1,000 Monte Carlo simulations · Returns sampled from historical US data (1926–2024) · Stocks avg ~10.5% nominal, bonds ~4.5% nominal")
+
+# ════════════════ TAB 2: SPENDING BUDGET ═════════════════════════════════════
+with tab_spend:
+    rows = []
+    # Living
+    rows.append({"Category": "Living Expenses", "Item": "Housing, food, utilities, misc", "Annual": spend, "Type": "living"})
+    # Healthcare
+    if use_health:
+        is_med = age >= 65
+        p_cnt = 2 if use_spouse else 1
+        if is_med:
+            rows.append({"Category": "Healthcare", "Item": f"Medicare Part B (×{p_cnt})", "Annual": part_b*12*p_cnt, "Type": "health"})
+            rows.append({"Category": "Healthcare", "Item": f"Medigap/Advantage (×{p_cnt})", "Annual": medigap*12*p_cnt, "Type": "health"})
+            rows.append({"Category": "Healthcare", "Item": f"Part D Drugs (×{p_cnt})", "Annual": part_d*12*p_cnt, "Type": "health"})
+        else:
+            rows.append({"Category": "Healthcare", "Item": "ACA/COBRA Premium (couple)", "Annual": aca*12, "Type": "health"})
+        rows.append({"Category": "Healthcare", "Item": "OOP: copays, labs, vision, dental", "Annual": oop_r, "Type": "health"})
+        rows.append({"Category": "Healthcare", "Item": "Prescriptions", "Annual": rx, "Type": "health"})
+        rows.append({"Category": "Healthcare", "Item": "Fitness / Wellness", "Annual": wellness, "Type": "health"})
+        rows.append({"Category": "Healthcare", "Item": "LTC Insurance Premium", "Annual": ltc_prem, "Type": "health"})
+    # Other expenses
+    if use_expense:
+        exp_items = [
+            ("Housing", "Property Tax", prop_tax), ("Housing", "Home Insurance", home_ins),
+            ("Housing", "Home Maintenance", home_maint), ("Insurance", "Life Insurance", life_ins),
+            ("Insurance", "Auto Insurance", auto_ins), ("Insurance", "Umbrella / Other", umbrella),
+            ("Lifestyle", "Travel", travel), ("Lifestyle", "Hobbies / Entertainment", hobbies),
+            ("Family", "Family Gifts / Grandkids", gifts), ("Charitable", "Charitable Giving", charity),
+        ]
+        for cat, item, val in exp_items:
+            if val > 0:
+                rows.append({"Category": cat, "Item": item, "Annual": val, "Type": "expense"})
+    # Income (negative)
+    ss1 = ss if age >= ss_age else 0
+    ss2 = spouse_ss if use_spouse and age >= spouse_ss_age else 0
+    if ss1 > 0:   rows.append({"Category": "Income", "Item": "Social Security (primary)", "Annual": -ss1, "Type": "income"})
+    if ss2 > 0:   rows.append({"Category": "Income", "Item": "Social Security (spouse)", "Annual": -ss2, "Type": "income"})
+    if pension>0: rows.append({"Category": "Income", "Item": "Pension / Annuity", "Annual": -pension, "Type": "income"})
+    if pt_income>0 and age<pt_until: rows.append({"Category": "Income", "Item": "Part-time Income", "Annual": -pt_income, "Type": "income"})
+
+    df_spend = pd.DataFrame(rows)
+    total_spend = df_spend["Annual"].sum()
+    gross_spend = df_spend[df_spend["Annual"] > 0]["Annual"].sum()
+
+    # Color map
+    color_map = {"living": "#4ade80", "health": "#f97316", "expense": "#38bdf8", "income": "#c084fc"}
+    df_spend["Color"] = df_spend["Type"].map(color_map)
+
+    # Waterfall chart
+    fig_wf = go.Figure(go.Waterfall(
+        name="Budget", orientation="v",
+        measure=["relative"] * len(df_spend) + ["total"],
+        x=list(df_spend["Item"]) + ["Net Withdrawal"],
+        y=list(df_spend["Annual"]) + [0],
+        connector=dict(line=dict(color="#1f2e1f", width=1)),
+        increasing=dict(marker_color="#4ade8088"),
+        decreasing=dict(marker_color="#c084fc88"),
+        totals=dict(marker_color="#4ade80"),
+    ))
+    fig_wf.update_layout(**PLOT_LAYOUT, height=380,
+                         yaxis=dict(title="$/yr", tickprefix="$", gridcolor="#0f1a0f"),
+                         xaxis=dict(tickangle=-35, gridcolor="#0f1a0f"))
+    st.plotly_chart(fig_wf, use_container_width=True)
+
+    # Table
+    df_display = df_spend.copy()
+    df_display["Annual"] = df_display["Annual"].apply(lambda v: f"{'−' if v<0 else '+'}{fmt(abs(v))}")
+    st.dataframe(df_display[["Category","Item","Annual"]].reset_index(drop=True),
+                 use_container_width=True, hide_index=True)
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Gross Annual Spending", fmt(gross_spend))
+    c2.metric("Total Income Offsets", fmt(-df_spend[df_spend["Annual"]<0]["Annual"].sum()))
+    c3.metric("Net Portfolio Draw (Year 1)", fmt(max(total_spend, 0)))
+
+    st.info(f"📌 Healthcare costs grow at **{hc_params['health_infl']*100:.1f}%/yr** vs general inflation **{infl:.1f}%/yr**. OOP increases 25% at 75 and 50% at 80. LTC costs phase in at 80.", icon="ℹ️")
+
+# ════════════════ TAB 3: SCENARIOS ═══════════════════════════════════════════
+with tab_scen:
+    scenario_rows = []
+    for label, pct_val in [("Best (90th %ile)", 90), ("Good (75th %ile)", 75),
+                           ("Median (50th %ile)", 50), ("Stress (25th %ile)", 25),
+                           ("Worst (10th %ile)", 10)]:
+        bal = float(np.percentile(end_arr, pct_val))
+        mult = f"{bal/corpus:.2f}x" if bal > 0 else "0x"
+        assess = ("Estate likely" if bal > corpus*2 else "On track") if bal > 0 \
+                 else ("Caution" if pct_val == 25 else "Depleted")
+        scenario_rows.append({"Scenario": label, "End Balance": fmtM(bal), "vs Corpus": mult, "Assessment": assess})
+    scenario_rows.append({
+        "Scenario": "Overall Success",
+        "End Balance": f"{sr*100:.1f}% of {n_sims:,}",
+        "vs Corpus": "—",
+        "Assessment": "Very safe" if sr>=.9 else ("Acceptable" if sr>=.8 else ("Borderline" if sr>=.7 else "High risk")),
+    })
+    st.dataframe(pd.DataFrame(scenario_rows), use_container_width=True, hide_index=True)
+
+    # End balance distribution
+    fig_hist = go.Figure()
+    fig_hist.add_trace(go.Histogram(
+        x=[e/1e6 for e in end_arr], nbinsx=50,
+        marker_color="#4ade8066", name="End Balance Distribution",
+    ))
+    fig_hist.add_vline(x=0, line_color="#f87171", line_dash="dash", annotation_text="Depleted")
+    fig_hist.add_vline(x=corpus/1e6, line_color="#fbbf24", line_dash="dot", annotation_text="Starting corpus")
+    fig_hist.update_layout(**PLOT_LAYOUT, height=320,
+                           xaxis=dict(title="End Balance ($M)", tickprefix="$", ticksuffix="M", gridcolor="#0f1a0f"),
+                           yaxis=dict(title="# Simulations", gridcolor="#0f1a0f"))
+    st.plotly_chart(fig_hist, use_container_width=True)
+
+# ════════════════ TAB 4: TAX ══════════════════════════════════════════════════
+with tab_tax:
+    if not use_tax:
+        st.info("Enable **Tax Modeling** in the sidebar to see this breakdown.", icon="💜")
+    else:
+        ss_yr1 = ss if age >= ss_age else 0
+        net_wd = max(spend + hc_year1 + other_expenses - (ss_yr1 + pension + pt_income), 0)
+        tr = compute_tax(net_wd, ss_yr1, qcd, account_type, filing, state_rate/100,
+                         persons, age, 1.0, med_deduct, salt, extra_std)
+        filing_label = {"mfj": "Married Filing Jointly", "single": "Single", "hoh": "Head of Household"}.get(filing, filing)
+        acct_label   = {"mixed":"Mixed (60% Trad/40% Roth)","traditional":"All Traditional","roth":"All Roth","taxable":"Taxable Brokerage"}.get(account_type,"")
+        st.caption(f"Year 1 estimate · {filing_label} · {acct_label} · State {state_rate:.1f}%")
+
+        col1, col2 = st.columns(2)
+        with col1:
+            tax_items = [
+                ("Net spending withdrawal", net_wd, ""),
+                ("QCD offset", -qcd if qcd else 0, "income"),
+                ("SS taxable portion", tr["ss_taxable"], "warn"),
+                ("Taxable ordinary income", tr["taxable_ord"], "warn"),
+            ]
+            if tr["ltcg"] > 0:
+                tax_items.append(("Long-term capital gains", tr["ltcg"], "warn"))
+            age65_add = AGE65_EXTRA.get(filing, 1550) * persons if age >= 65 else 0
+            if age65_add:
+                tax_items.append((f"Age-65 deduction (×{persons})", -age65_add, "income"))
+            if med_deduct:
+                tax_items.append(("Medical expense deduction", -med_deduct, "income"))
+            if salt:
+                tax_items.append(("SALT / itemized", -salt, "income"))
+            tax_items += [
+                ("Federal income tax", tr["federal"], "tax"),
+                ("State income tax", tr["state"], "tax"),
+                ("Total tax burden", tr["total"], "total"),
+                ("Gross withdrawal required", net_wd + tr["total"], "gross"),
+                ("Effective tax rate", tr["eff_rate"], "rate"),
+            ]
+            df_tax = pd.DataFrame([
+                {"Line Item": n,
+                 "Amount": f"${abs(v):,.0f}" if "rate" not in n else f"{v*100:.1f}%"}
+                for n, v, _ in tax_items if v != 0
+            ])
+            st.dataframe(df_tax, use_container_width=True, hide_index=True)
+
+        with col2:
+            # Pie: tax vs net spending
+            if tr["total"] > 0:
+                fig_pie = go.Figure(go.Pie(
+                    labels=["Federal Tax", "State Tax", "Net Spending"],
+                    values=[tr["federal"], tr["state"], net_wd],
+                    marker_colors=["#c084fc", "#7c3aed", "#4ade80"],
+                    hole=0.45,
+                    textfont=dict(family="IBM Plex Mono", size=11),
+                ))
+                fig_pie.update_layout(**PLOT_LAYOUT, height=280, showlegend=True,
+                                      margin=dict(l=10,r=10,t=30,b=10))
+                st.plotly_chart(fig_pie, use_container_width=True)
+
+        st.markdown("""
+        **💡 Tax reduction strategies:**
+        - **Roth conversions** in low-income years before SS starts
+        - **QCDs from IRA** (age 70½+) — donated directly, not counted as income
+        - **Tax-loss harvesting** in taxable accounts
+        - **No-income-tax states:** FL, TX, NV, WA, WY, SD, AK
+        - **IRMAA planning** — keep MAGI below Medicare surcharge thresholds
+        """)
+
+# ════════════════ TAB 5: HEALTHCARE ══════════════════════════════════════════
+with tab_health:
+    if not use_health:
+        st.info("Enable **Healthcare & Medicines** in the sidebar.", icon="🟠")
+    else:
+        # Projected cost table at 5-year intervals
+        hc_proj = []
+        num_p = 2 if use_spouse else 1
+        for y_off in range(0, min(years+1, 36), 5):
+            a = age + y_off
+            hc = health_cost_year(y_off, a, num_p, hc_params)
+            f_gen = (1 + infl/100) ** y_off
+            f_hc  = (1 + hc_params["health_infl"]) ** y_off
+            is_med = a >= 65
+            ltc_a  = a < hc_params["ltc_until_age"]
+            hc_proj.append({
+                "Age": a,
+                "Medicare?": "Yes" if is_med else "Pre-65 ACA",
+                "Annual Cost": fmt(hc),
+                "vs Today": f"{hc / hc_year1:.1f}x" if hc_year1 > 0 else "—",
+                "LTC Active": "Insurance" if ltc_a else ("OOP" if a >= 80 else "—"),
+            })
+        st.dataframe(pd.DataFrame(hc_proj), use_container_width=True, hide_index=True)
+
+        # Line chart
+        hc_ages, hc_vals = [], []
+        for y_off in range(min(years+1, 41)):
+            a = age + y_off
+            hc_ages.append(a)
+            hc_vals.append(health_cost_year(y_off, a, num_p, hc_params))
+
+        fig_hc = go.Figure()
+        fig_hc.add_trace(go.Scatter(x=hc_ages, y=hc_vals, mode="lines", fill="tozeroy",
+                                    fillcolor="rgba(249,115,22,0.12)", line=dict(color="#f97316", width=2),
+                                    name="Annual Healthcare Cost",
+                                    hovertemplate="Age %{x}<br>Cost: $%{y:,.0f}<extra></extra>"))
+        fig_hc.add_vline(x=65, line_color="#4ade8055", line_dash="dash", annotation_text="Medicare")
+        fig_hc.add_vline(x=hc_params["ltc_until_age"], line_color="#f8717155", line_dash="dot",
+                         annotation_text="LTC → OOP")
+        fig_hc.update_layout(**PLOT_LAYOUT, height=340,
+                             xaxis=dict(title="Age", gridcolor="#0f1a0f"),
+                             yaxis=dict(title="Annual Cost", tickprefix="$", gridcolor="#0f1a0f"))
+        st.plotly_chart(fig_hc, use_container_width=True)
+
+        # Benchmarks
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Avg Lifetime Health Cost (sim)", fmtM(R["avg_health"]))
+        c2.metric("Fidelity 2024 Benchmark (couple)", "$413,000")
+        c3.metric("HealthView Avg (couple, 65–90)", "$662,000")
+
+        st.warning("""
+**⚠️ Healthcare cost notes:**
+- OOP increases **25% at age 75** and **50% at age 80** (chronic conditions, mobility, cognitive)
+- **Dental, vision, hearing** not covered by Medicare — budget $2–4k/yr
+- LTC costs: median nursing home ~$104k/yr · Home care ~$60k/yr · Memory care ~$120k/yr
+- **IRMAA surcharges** apply if MAGI > $103k (single) / $206k (MFJ) — can add $2–8k/yr to Part B+D
+        """)
+
+# ════════════════ TAB 6: DEPLETION ════════════════════════════════════════════
+with tab_depl:
+    fail_count = len(fail_years)
+    if fail_count == 0:
+        st.success(f"✅ Zero portfolios depleted across all {n_sims:,} simulations. Excellent position.")
+    else:
+        fail_ages = [age + fy for fy in fail_years]
+        fail_rate = fail_count / n_sims * 100
+        avg_fail  = np.mean(fail_ages)
+        med_fail  = np.median(fail_ages)
+        early     = sum(1 for fy in fail_years if fy < years * 0.5)
+
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Failure Rate",       f"{fail_rate:.1f}%")
+        col2.metric("Avg Depletion Age",  f"{avg_fail:.0f}")
+        col3.metric("Median Depletion",   f"{med_fail:.0f}")
+        col4.metric("Early Failures (<50% horizon)", f"{early} ({early/fail_count*100:.0f}%)")
+
+        # Histogram of depletion ages
+        fig_dep = go.Figure()
+        fig_dep.add_trace(go.Histogram(
+            x=fail_ages, nbinsx=years,
+            marker_color="#f8717166", name="Depletion Age",
+        ))
+        fig_dep.update_layout(**PLOT_LAYOUT, height=300,
+                              xaxis=dict(title="Age at Depletion", gridcolor="#0f1a0f"),
+                              yaxis=dict(title="# Simulations Failed", gridcolor="#0f1a0f"))
+        st.plotly_chart(fig_dep, use_container_width=True)
+
+        st.warning(f"""
+**{early} of {fail_count} failures ({early/fail_count*100:.0f}%) occurred in the first half of retirement** — classic sequence-of-returns risk.
+
+**Mitigation strategies:**
+- Hold **2–3 years of expenses** in cash or short-term bonds (bond ladder)
+- Consider a **Guardrail strategy** — cut spending 10% when withdrawal rate exceeds 5.5%
+- **Delay SS** to 70 for maximum benefit (~8%/yr increase from 62 to 70)
+- Part-time income in early retirement dramatically reduces sequence risk
+        """)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Footer
+# ─────────────────────────────────────────────────────────────────────────────
+st.divider()
+st.caption(
+    "* Returns sampled from historical US stock & bond data (1926–2024). "
+    "Stocks avg ~10.5% nominal, bonds ~4.5% nominal. "
+    "Healthcare defaults: HealthView 2024 & Fidelity Retiree Health Cost Estimate. "
+    "Medicare Part B = 2024 standard premium $174.70/mo. "
+    "Tax law: 2024 federal brackets. "
+    "**Not financial advice.** Past performance does not guarantee future results."
+)
